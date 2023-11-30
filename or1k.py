@@ -78,7 +78,7 @@ class or1k_processor_t(processor_t):
     # only one assembler is supported
     assembler = {
         # flag
-        "flag": ASH_HEXF0 | ASD_DECF0 | ASO_OCTF5 | ASB_BINF0 | AS_N2CHR,
+        "flag": ASH_HEXF3 | ASD_DECF0 | ASO_OCTF1 | ASB_BINF3 | AS_N2CHR,
 
         # user defined flags (local only for IDP) (optional)
         "uflag": 0,
@@ -96,7 +96,7 @@ class or1k_processor_t(processor_t):
         "end": ".end",
 
         # comment string (see also cmnt2)
-        "cmnt": ";",
+        "cmnt": "#",
 
         # ASCII string delimiter
         'ascsep': "\"",
@@ -141,7 +141,7 @@ class or1k_processor_t(processor_t):
         'a_seg': "seg",
 
         # current IP (instruction pointer) symbol in assembler
-        'a_curip': "$",
+        'a_curip': ".",
 
         # "public" name keyword. NULL-gen default, ""-do not generate
         'a_public': "",
@@ -273,7 +273,7 @@ class or1k_processor_t(processor_t):
         0x3b: 'lf.sfuge.d',
         0x3c: 'lf.sfult.d',
         0x3d: 'lf.sfule.d',
-        0x3e: 'lf.sfun.d',
+        0x3e: 'lf.sfun.d'
     }
 
     maptbl_vec = {
@@ -699,7 +699,7 @@ class or1k_processor_t(processor_t):
             cur = get_wide_dword(insn.ea)
             flow = cur >> 26 & 0x3f != 0x09 # l.rfe
             if flow:
-                flow = (prev_opc - 0x11) & 0xfe != 0 # l.jr, l.jalr
+                flow = not prev_opc in [0, 0x11] # l.j, l.jr
         # no delay slot
         else:
             flow = Feature & CF_STOP == 0
@@ -717,9 +717,7 @@ class or1k_processor_t(processor_t):
         elif optype == o_imm:
             # TODO: OOFW_IMM uses op.dtype
             ctx.out_value(op, OOFW_32 | OOF_SIGNED)
-        elif optype in [o_near, o_mem]:
-            if optype == o_mem and op.specval == FL_ABSOLUTE:
-                ctx.out_symbol('&')
+        elif optype == o_near:
             r = ctx.out_name_expr(op, op.addr, BADADDR)
             if not r:
                 ctx.out_tagon(COLOR_ERROR)
@@ -761,7 +759,7 @@ class or1k_processor_t(processor_t):
             prev_nd = ida_segregs.get_sreg(ctx.bin_ea - 1, self.ireg_ND)
 
         if nd != prev_nd:
-            ctx.out_line("; ND = " + str(nd), COLOR_REGCMT)
+            ctx.out_line("# ND = " + str(nd), COLOR_REGCMT)
             ctx.flush_outbuf()
         return 1
 
@@ -776,7 +774,7 @@ class or1k_processor_t(processor_t):
 
         if ctx.insn.Op1.type != o_void:
             ctx.out_one_operand(0)
-        for i in range(1, 4):
+        for i in range(1, 5):
             if ctx.insn[i].type == o_void:
                 break
             ctx.out_symbol(',')
@@ -794,7 +792,7 @@ class or1k_processor_t(processor_t):
         {'name': '', 'feature': 0, 'cmt': 'bad opcode'},
 
         # opcode 0x00..0x05
-        {'name': 'l.j',     'feature': CF_USE1 | CF_JUMP, 'cmt': 'Jump'},
+        {'name': 'l.j',     'feature': CF_USE1 | CF_JUMP | CF_STOP, 'cmt': 'Jump'},
         {'name': 'l.jal',   'feature': CF_USE1 | CF_CALL, 'cmt': 'Jump and Link'},
         {'name': 'l.adrp',  'feature': CF_CHG1 | CF_USE2, 'cmt': 'Compute Instruction Relative Address'},
         {'name': 'l.bnf',   'feature': CF_USE1 | CF_JUMP, 'cmt': 'Branch if No Flag'},
@@ -871,8 +869,8 @@ class or1k_processor_t(processor_t):
         {'name': 'lv.xor',      'feature': CF_CHG1 | CF_USE2 | CF_USE3, 'cmt': 'Vector Exclusive Or'},
 
         # opcode 0x11..0x13
-        {'name': 'l.jr',    'feature': CF_USE1 | CF_STOP, 'cmt': 'Jump Register'},
-        {'name': 'l.jalr',  'feature': CF_USE1 | CF_STOP, 'cmt': 'Jump and Link Register'},
+        {'name': 'l.jr',    'feature': CF_USE1 | CF_JUMP | CF_STOP, 'cmt': 'Jump Register'},
+        {'name': 'l.jalr',  'feature': CF_USE1 | CF_CALL, 'cmt': 'Jump and Link Register'},
         {'name': 'l.maci',  'feature': CF_USE1 | CF_USE2, 'cmt': 'Multiply Immediate Signed and Accumulate'},
 
         # opcode 0x1a..0x26
@@ -978,7 +976,7 @@ class or1k_processor_t(processor_t):
         {'name': 'l.cust5', 'feature': CF_USE1 | CF_USE2 | CF_USE3 | CF_USE4 | CF_USE5, 'cmt': 'Reserved for Custom Instructions'},
         {'name': 'l.cust6', 'feature': 0, 'cmt': 'Reserved for Custom Instructions'},
         {'name': 'l.cust7', 'feature': 0, 'cmt': 'Reserved for Custom Instructions'},
-        {'name': 'l.cust8', 'feature': 0, 'cmt': 'Reserved for Custom Instructions'},
+        {'name': 'l.cust8', 'feature': 0, 'cmt': 'Reserved for Custom Instructions'}
     ]
 
     # icode of the first instruction
@@ -1020,7 +1018,7 @@ class or1k_processor_t(processor_t):
             ['gt', 'Greater Than'],
             ['le', 'Less Than or Equal To'],
             ['lt', 'Less Than'],
-            ['ne', 'Not Equal'],
+            ['ne', 'Not Equal']
         ]
 
         # opcode 0x0a
@@ -1044,7 +1042,7 @@ class or1k_processor_t(processor_t):
             ['uge', 'Unordered or Greater Than or Equal'],
             ['ult', 'Unordered or Less Than'],
             ['ule', 'Unordered or Less Than or Equal'],
-            ['un', 'Unordered'],
+            ['un', 'Unordered']
         ]
 
         # opcode 0x32

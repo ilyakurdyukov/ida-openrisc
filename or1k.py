@@ -28,6 +28,11 @@ def SIGNEXT(x, b):
 # 1: CPU does not execute instructions in delay slot if taking jump/branch
 DEFAULT_ND = 1
 
+# values for insn_t.auxpref
+AUX_LO = 1 # lo(imm)
+
+FIND_MOVHI_RANGE = 2
+
 # ----------------------------------------------------------------------
 class or1k_processor_t(processor_t):
     """
@@ -519,6 +524,10 @@ class or1k_processor_t(processor_t):
                 else:
                     insn.Op3.value = raw & 0xffff
 
+                # try to find l.movhi to combine
+                if insn.itype == self.itype_ori:
+                    self.find_movhi(insn)
+
         # load
         elif opc >= 0x1a and opc <= 0x26:
             insn.itype = self.maptbl_load[opc - 0x1a]
@@ -661,6 +670,33 @@ class or1k_processor_t(processor_t):
         return insn.size
 
     # ----------------------------------------------------------------------
+    def find_movhi(self, insn):
+        reg = insn.Op2.reg
+        ea = insn.ea
+        for i in range(0, FIND_MOVHI_RANGE):
+            if not get_flags(ea) & FF_FLOW:
+                return False
+            ea -= 4
+            prev = insn_t()
+            if decode_insn(prev, ea) == BADADDR:
+                return False
+            if not prev.get_canon_feature() & CF_CHG1:
+                continue
+            if prev.Op1.type != o_reg or prev.Op1.reg != reg:
+                continue
+            if prev.itype != self.itype_movhi:
+                break
+
+            value = prev.Op2.value << 16
+            if insn.itype == self.itype_ori:
+                value |= insn.Op3.value
+            else:
+                value += insn.Op3.value
+            insn.Op3.value = value & 0xffffffff
+            insn.auxpref = AUX_LO
+            return
+
+    # ----------------------------------------------------------------------
     def handle_operand(self, insn, op, dref_flag, no_delay):
         if op.type == o_near:
             if insn.get_canon_feature() & CF_CALL:
@@ -715,8 +751,14 @@ class or1k_processor_t(processor_t):
         if optype == o_reg:
             ctx.out_register(self.reg_names[op.reg])
         elif optype == o_imm:
-            # TODO: OOFW_IMM uses op.dtype
-            ctx.out_value(op, OOFW_32 | OOF_SIGNED)
+            if ctx.insn.auxpref & AUX_LO:
+                ctx.out_line('lo', COLOR_KEYWORD)
+                ctx.out_symbol('(')
+                ctx.out_value(op, OOFW_32)
+                ctx.out_symbol(')')
+            else:
+                # TODO: OOFW_IMM uses op.dtype
+                ctx.out_value(op, OOFW_32 | OOF_SIGNED)
         elif optype == o_near:
             r = ctx.out_name_expr(op, op.addr, BADADDR)
             if not r:
@@ -1058,6 +1100,9 @@ class or1k_processor_t(processor_t):
 
         # icode of the last instruction + 1
         self.instruc_end = len(self.instruc)
+
+        self.itype_movhi = self.name2icode['l.movhi']
+        self.itype_ori = self.name2icode['l.ori']
 
         self.maptbl_shift_imm = list()
         for s in self.maptbl_shift:

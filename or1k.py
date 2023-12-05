@@ -31,7 +31,7 @@ DEFAULT_ND = 1
 # values for insn_t.auxpref
 AUX_LO = 1 # lo(imm)
 
-FIND_MOVHI_RANGE = 2
+FIND_MOVHI_RANGE = 16
 
 # ----------------------------------------------------------------------
 class or1k_processor_t(processor_t):
@@ -670,24 +670,59 @@ class or1k_processor_t(processor_t):
         return insn.size
 
     # ----------------------------------------------------------------------
+    # should be faster than using decode_insn
+    def decode_rD(self, raw):
+        opc = (raw >> 26) & 0x3f
+        rD = (raw >> 21) & 0x1f
+        # arith
+        if opc == 0x38:
+            opc2 = raw & 0xf
+            if opc2 == 7 or opc2 == 0xc: # l.muld, l.muldu
+                return 0
+            return rD
+        # load, arith imm16
+        if opc >= 0x1a and opc <= 0x2e:
+            if opc < 0x1c or opc > 0x1f:
+                return rD
+            return 0
+        if opc in [0x00, 0x11, 0x09]: # l.j, l.jr, l.rfe
+            return -2
+        if opc == 0x01 or opc == 0x12: # l.jal, l.jalr
+            return -3
+        if opc == 0x02 or opc == 0x06: # l.adrp, l.movhi, l.macrc
+            return rD
+        if opc == 0x32: # float
+            # lf.sf*, lf.cust1.*
+            if raw & 0xc7 >= 8:
+                return 0
+            return rD
+        if opc == 0x0a: # vector
+            # lv.cust*
+            if raw & 0xff >= 0xc0:
+                return 0
+            return rD
+        return 0
+
+    # ----------------------------------------------------------------------
     def find_movhi(self, insn):
         reg = insn.Op2.reg
         ea = insn.ea
+        if reg == 0:
+            return
         for i in range(0, FIND_MOVHI_RANGE):
             if not get_flags(ea) & FF_FLOW:
                 return False
             ea -= 4
-            prev = insn_t()
-            if decode_insn(prev, ea) == BADADDR:
-                return False
-            if not prev.get_canon_feature() & CF_CHG1:
+            prev = get_wide_dword(ea)
+            rD = self.decode_rD(prev)
+            if rD < 0: # jump, call
+                break
+            if rD != reg:
                 continue
-            if prev.Op1.type != o_reg or prev.Op1.reg != reg:
-                continue
-            if prev.itype != self.itype_movhi:
+            if prev & 0xfc010000 != 0x18000000: # l.movhi
                 break
 
-            value = prev.Op2.value << 16
+            value = (prev & 0xffff) << 16
             if insn.itype == self.itype_ori:
                 value |= insn.Op3.value
             else:

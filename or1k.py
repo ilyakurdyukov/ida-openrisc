@@ -33,6 +33,14 @@ AUX_LO = 1 # lo(imm)
 
 FIND_MOVHI_RANGE = 16
 
+DECODE_RD_NONE = 0
+DECODE_RD_CUST = -1
+DECODE_RD_JUMP = -2
+DECODE_RD_CALL = -3
+
+# Registers that are preserved across calls.
+CALLEE_SAVED_MASK = 0x55554407
+
 # ----------------------------------------------------------------------
 class or1k_processor_t(processor_t):
     """
@@ -678,30 +686,30 @@ class or1k_processor_t(processor_t):
         if opc == 0x38:
             opc2 = raw & 0xf
             if opc2 == 7 or opc2 == 0xc: # l.muld, l.muldu
-                return 0
+                return DECODE_RD_NONE
             return rD
         # load, arith imm16
         if opc >= 0x1a and opc <= 0x2e:
-            if opc < 0x1c or opc > 0x1f:
-                return rD
-            return 0
+            if opc >= 0x1c and opc < 0x20: # l.cust*
+                return DECODE_RD_CUST
+            return rD
         if opc in [0x00, 0x11, 0x09]: # l.j, l.jr, l.rfe
-            return -2
+            return DECODE_RD_JUMP
         if opc == 0x01 or opc == 0x12: # l.jal, l.jalr
-            return -3
+            return DECODE_RD_CALL
         if opc == 0x02 or opc == 0x06: # l.adrp, l.movhi, l.macrc
             return rD
         if opc == 0x32: # float
-            # lf.sf*, lf.cust1.*
-            if raw & 0xc7 >= 8:
-                return 0
+            if raw & 0xff >= 0xd0: # lf.cust1.*
+                return DECODE_RD_CUST
+            if raw & 0x08: # lf.sf*
+                return DECODE_RD_NONE
             return rD
         if opc == 0x0a: # vector
-            # lv.cust*
-            if raw & 0xff >= 0xc0:
-                return 0
+            if raw & 0xff >= 0xc0: # lv.cust*
+                return DECODE_RD_CUST
             return rD
-        return 0
+        return DECODE_RD_NONE
 
     # ----------------------------------------------------------------------
     def find_movhi(self, insn):
@@ -709,13 +717,16 @@ class or1k_processor_t(processor_t):
         ea = insn.ea
         if reg == 0:
             return
+        preserved = CALLEE_SAVED_MASK >> reg & 1
         for i in range(0, FIND_MOVHI_RANGE):
             if not get_flags(ea) & FF_FLOW:
                 return False
             ea -= 4
             prev = get_wide_dword(ea)
             rD = self.decode_rD(prev)
-            if rD < 0: # jump, call
+            if rD == DECODE_RD_JUMP:
+                break
+            if rD == DECODE_RD_CALL and not preserved:
                 break
             if rD != reg:
                 continue

@@ -634,7 +634,7 @@ class or1k_processor_t(processor_t):
         # vector
         elif opc == 0x0a:
             opc2 = raw & 0xff
-            if opc2 in maptbl_vec:
+            if opc2 in self.maptbl_vec:
                 insn.itype = self.maptbl_vec[opc2]
                 insn.Op1.type = o_reg
                 insn.Op1.reg = rD
